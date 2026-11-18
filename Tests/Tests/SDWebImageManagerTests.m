@@ -664,6 +664,43 @@
     [self waitForExpectationsWithCommonTimeout];
 }
 
+- (void)test23ThatQueryOriginalDiskCacheFromThumbnailShouldNotWriteThumbnailToOriginalMemoryKey {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"A thumbnail decoded from the original disk cache should not be written back to memory under the original key"];
+    
+    SDImageCache *cache = [[SDImageCache alloc] initWithNamespace:NSUUID.UUID.UUIDString];
+    SDWebImageManager *manager = [[SDWebImageManager alloc] initWithCache:cache loader:SDWebImageDownloader.sharedDownloader];
+    NSURL *url = [NSURL URLWithString:@"https://placehold.co/504x504.png"];
+    NSString *originalKey = [manager cacheKeyForURL:url];
+    // 1. The full size image is in the disk cache only, e.g. after an earlier full size load and a memory warning
+    CGSize fullSize = CGSizeMake(504, 504);
+    SDGraphicsImageRenderer *renderer = [[SDGraphicsImageRenderer alloc] initWithSize:fullSize];
+    UIImage *fullSizeImage = [renderer imageWithActions:^(CGContextRef  _Nonnull context) {
+        CGContextSetRGBFillColor(context, 0.0, 1.0, 0.0, 1.0);
+        CGContextFillRect(context, CGRectMake(0, 0, fullSize.width, fullSize.height));
+    }];
+    [cache storeImageDataToDisk:fullSizeImage.sd_imageData forKey:originalKey];
+    
+    // 2. Query a thumbnail size which is not cached yet: it decodes the original disk data at the thumbnail size
+    SDWebImageContext *context = @{SDWebImageContextImageThumbnailPixelSize: @(CGSizeMake(100, 100))};
+    NSString *thumbnailKey = [manager cacheKeyForURL:url context:context];
+    [manager loadImageWithURL:url options:SDWebImageWaitStoreCache context:context progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, SDImageCacheType cacheType, BOOL finished, NSURL * _Nullable imageURL) {
+        expect(cacheType).equal(SDImageCacheTypeDisk);
+        expect(image.size.width).equal(100);
+        // 3. The thumbnail is in memory under the thumbnail key, never under the original key
+        expect([cache imageFromMemoryCacheForKey:thumbnailKey].size.width).equal(100);
+        UIImage *originalMemoryImage = [cache imageFromMemoryCacheForKey:originalKey];
+        expect(originalMemoryImage.sd_isThumbnail).beFalsy();
+        // 4. A full size query then gets the full size image
+        [manager loadImageWithURL:url options:0 context:nil progress:nil completed:^(UIImage * _Nullable fullImage, NSData * _Nullable fullData, NSError * _Nullable fullError, SDImageCacheType fullCacheType, BOOL fullFinished, NSURL * _Nullable fullImageURL) {
+            expect(fullImage.size.width).equal(504);
+            expect(fullImage.sd_isThumbnail).beFalsy();
+            [expectation fulfill];
+        }];
+    }];
+    
+    [self waitForExpectationsWithCommonTimeout];
+}
+
 - (NSString *)testJPEGPath {
     NSBundle *testBundle = [NSBundle bundleForClass:[self class]];
     return [testBundle pathForResource:@"TestImage" ofType:@"jpg"];
