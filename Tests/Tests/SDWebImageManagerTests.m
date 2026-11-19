@@ -673,25 +673,31 @@
     NSString *originalKey = [manager cacheKeyForURL:url];
     // 1. The full size image is in the disk cache only, e.g. after an earlier full size load and a memory warning
     CGSize fullSize = CGSizeMake(504, 504);
-    SDGraphicsImageRenderer *renderer = [[SDGraphicsImageRenderer alloc] initWithSize:fullSize];
+    // Scale 1, so the fixture is 504 pixels wide on any screen and decodes back to 504 (the key has no scale suffix)
+    SDGraphicsImageRendererFormat *format = [[SDGraphicsImageRendererFormat alloc] init];
+    format.scale = 1;
+    SDGraphicsImageRenderer *renderer = [[SDGraphicsImageRenderer alloc] initWithSize:fullSize format:format];
     UIImage *fullSizeImage = [renderer imageWithActions:^(CGContextRef  _Nonnull context) {
         CGContextSetRGBFillColor(context, 0.0, 1.0, 0.0, 1.0);
         CGContextFillRect(context, CGRectMake(0, 0, fullSize.width, fullSize.height));
     }];
     [cache storeImageDataToDisk:fullSizeImage.sd_imageData forKey:originalKey];
     
-    // 2. Query a thumbnail size which is not cached yet: it decodes the original disk data at the thumbnail size
+    // 2. Query a thumbnail size which is not cached yet: it decodes the original disk data at the thumbnail size.
+    // Both loads are cache only, so a cache miss fails the test instead of downloading the same image.
     SDWebImageContext *context = @{SDWebImageContextImageThumbnailPixelSize: @(CGSizeMake(100, 100))};
     NSString *thumbnailKey = [manager cacheKeyForURL:url context:context];
-    [manager loadImageWithURL:url options:SDWebImageWaitStoreCache context:context progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, SDImageCacheType cacheType, BOOL finished, NSURL * _Nullable imageURL) {
+    [manager loadImageWithURL:url options:SDWebImageFromCacheOnly | SDWebImageWaitStoreCache context:context progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, SDImageCacheType cacheType, BOOL finished, NSURL * _Nullable imageURL) {
         expect(cacheType).equal(SDImageCacheTypeDisk);
         expect(image.size.width).equal(100);
         // 3. The thumbnail is in memory under the thumbnail key, never under the original key
         expect([cache imageFromMemoryCacheForKey:thumbnailKey].size.width).equal(100);
         UIImage *originalMemoryImage = [cache imageFromMemoryCacheForKey:originalKey];
         expect(originalMemoryImage.sd_isThumbnail).beFalsy();
-        // 4. A full size query then gets the full size image
-        [manager loadImageWithURL:url options:0 context:nil progress:nil completed:^(UIImage * _Nullable fullImage, NSData * _Nullable fullData, NSError * _Nullable fullError, SDImageCacheType fullCacheType, BOOL fullFinished, NSURL * _Nullable fullImageURL) {
+        // 4. A full size query then gets the full size image from the cache
+        [manager loadImageWithURL:url options:SDWebImageFromCacheOnly context:nil progress:nil completed:^(UIImage * _Nullable fullImage, NSData * _Nullable fullData, NSError * _Nullable fullError, SDImageCacheType fullCacheType, BOOL fullFinished, NSURL * _Nullable fullImageURL) {
+            expect(fullError).beNil();
+            expect(fullCacheType).notTo.equal(SDImageCacheTypeNone);
             expect(fullImage.size.width).equal(504);
             expect(fullImage.sd_isThumbnail).beFalsy();
             [expectation fulfill];

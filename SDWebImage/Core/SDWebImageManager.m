@@ -18,11 +18,12 @@
 static id<SDImageCache> _defaultImageCache;
 static id<SDImageLoader> _defaultImageLoader;
 
-/// The key to write a disk-hit image of `key` back to memory under: `key` itself, or, when the image was decoded as a
-/// thumbnail and `key` is not a thumbnail key, the matching thumbnail key.
-static NSString * _Nullable SDWriteBackKeyForDiskImage(UIImage * _Nullable image, NSString * _Nullable key) {
-    if (!image.sd_isThumbnail || !key || [key rangeOfString:@"-Thumbnail("].location != NSNotFound) {
-        return key;
+/// The key to write a disk-hit image of the original query back to memory under. `originalKey` comes from
+/// `originalCacheKeyForURL:context:` and never carries a thumbnail suffix, so the image's own state decides: the full
+/// image keeps `originalKey`, a thumbnail decoded from the original data goes under the matching thumbnail key.
+static NSString * _Nullable SDWriteBackKeyForOriginalDiskImage(UIImage * _Nullable image, NSString * _Nullable originalKey) {
+    if (!image.sd_isThumbnail || !originalKey) {
+        return originalKey;
     }
     SDImageCoderOptions *options = image.sd_decodeOptions;
     NSValue *thumbnailSizeValue = options[SDImageCoderDecodeThumbnailPixelSize];
@@ -33,7 +34,7 @@ static NSString * _Nullable SDWriteBackKeyForDiskImage(UIImage * _Nullable image
 #endif
     NSNumber *preserveAspectRatioValue = options[SDImageCoderDecodePreserveAspectRatio];
     BOOL preserveAspectRatio = preserveAspectRatioValue != nil ? preserveAspectRatioValue.boolValue : YES;
-    return SDThumbnailedKeyForKey(key, thumbnailSize, preserveAspectRatio);
+    return SDThumbnailedKeyForKey(originalKey, thumbnailSize, preserveAspectRatio);
 }
 
 @interface SDWebImageCombinedOperation ()
@@ -401,7 +402,7 @@ static NSString * _Nullable SDWriteBackKeyForDiskImage(UIImage * _Nullable image
                     // The query decodes the full image data with the context's thumbnail size, so `cachedImage` may be a
                     // thumbnail. Keep it under its thumbnail key: written under the full image's key, any later full
                     // size query of that key would get the thumbnail from memory.
-                    NSString *writeBackKey = SDWriteBackKeyForDiskImage(cachedImage, key);
+                    NSString *writeBackKey = SDWriteBackKeyForOriginalDiskImage(cachedImage, key);
                     // Sync
                     [imageCache storeImage:cachedImage imageData:nil forKey:writeBackKey cacheType:SDImageCacheTypeMemory completion:nil];
                 }
